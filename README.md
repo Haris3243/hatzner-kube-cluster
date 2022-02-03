@@ -91,6 +91,8 @@ Now you have to install network plugins. we will use **kube-flannel** using foll
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/v0.14.0/Documentation/kube-flannel.yml
+
+kubectl -n kube-system patch ds kube-flannel-ds --type json -p '[{"op":"add","path":"/spec/template/spec/tolerations/-","value":{"key":"node.cloudprovider.kubernetes.io/uninitialized","value":"true","effect":"NoSchedule"}}]'
 ```
 
 and then check again pods using `kubectl get nodes -o wide`, this issue seems fixed and nodes are in ready state
