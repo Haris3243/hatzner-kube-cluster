@@ -1,4 +1,4 @@
-# How to Deply Kubernetes Cluster on Hatzen Cloud
+# How to Deply Kubernetes Cluster on Hatzner Cloud
 
 In this guide we will setup the kubernetes cluster on the hatzen cloud from scratch.
 
