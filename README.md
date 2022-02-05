@@ -141,29 +141,126 @@ kubectl delete pod my-csi-app
 kubectl delete pvc csi-pvc
 ```
 
-## 6. Monitor Cluster using Prometheus and Grafana
+## 6. Deploy HELM
 
-Now we can deploy prometheus and grafana to monitor our infrastructure.
-run the following commands to deploy this stack.
-
-```bash
-git clone https://github.com/prometheus-operator/kube-prometheus.git
-
-cd kube-prometheus
-
-kubectl create -f manifests/setup
-
-until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ""; done
-
-kubectl create -f manifests/
-
-kubectl get pods -n monitoring
-```
-
-Now, we have to allow port forwarding from localhost to cluster so that we can access grafana dashboard.
+Now, we will install helm so that we can easily deploy prometheus and grafana using helm charts. To install helm, execute following commands
 
 ```bash
-kubectl --namespace monitoring port-forward svc/grafana 3000
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+
+chmod 700 get_helm.sh
+
+./get_helm.sh
 ```
 
-Thats it. you should be able to access your grafana dashboard now on http://localhost:3000
+## 7. Deploy Grafana & Prometheus Using HELM
+
+To deploy grafana and prometheus, we will use following commands
+
+```bash
+helm repo add stable https://charts.helm.sh/stable
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+
+helm repo update
+
+helm install prometheus prometheus-community kube-prometheus-stack -n grafana --create-namespace
+```
+
+Now we can check pods or services status using following commands.
+
+```bash
+kubectl get pods -n grafana
+kubectl get svc -n grafana
+```
+
+and we can access it on http://localhost:3000. 
+```
+grafana dashboard details:
+username: admin
+password: prom-operator
+```
+To make it accessible from remote machines, we will deploy hatzner load balancer and ingress-nginx to route the trafic.
+
+## 8. Create Hatzner Loadbalancer
+
+Goto loadbalancer tab in hatzner cloud console and create a loadbalancer. all you have to do is attach it to a private network that we created earlier with the name `kube-network`.
+
+![createLB](images/loadbalancer-config.png)
+
+Once you deployed. note down your reserved DNS name from network tab in loadbalancer.
+
+## 9. Deploy ingress-nginx in cluster
+
+To deploy ingress-nginx we will use the helm charts. 
+
+```bash
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
+```
+
+Now we can check the status of ingress using following command.
+
+```bash
+kubectl describe svc/ingress-nginx-controller -n ingress-nginx
+```
+
+Now, configure ingress-nginx service so that it can talk to loadbalancer. Run the following command
+
+```bash
+kubectl edit svc/ingress-nginx-controller --namespace=ingress-nginx
+```
+
+Now, this will open up the configuration file. we will add following annotations. (please update your LB location and name)
+
+```bash 
+load-balancer.hetzner.cloud/location: Nuremberg
+load-balancer.hetzner.cloud/name: load-balancer-1
+```
+
+Now, go back to loadbalancer on hatzner cloud and add target machine. you will see that in few seconds your Loadbalancer status will be healthy. Thats mean our loadbalancer is configured with ingress.
+
+## 10. Create Routing for Grafana & Prometheus
+
+create a grafana-ingress.yaml file and past following content. 
+
+```
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: grafana
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  rules:
+  - host: <your-loadbalancer's reserved DNS>
+    http:
+      paths:
+      - backend:
+          service:
+            name: prometheus-grafana
+            port:
+              number: 3000
+        path: /?(.*)
+        pathType: Prefix
+```
+
+please don't forget to update your loadbalancer's reserved dns in host attribute and note that we are specifying the same namespace in which our grafana is running. Now we will apply this file.
+
+```bash
+kubectl apply -f grafana-ingress.yaml
+```
+
+Now from any remote we can access our grafana dashboard using reserverd dns of our loadbalancer. for my scenario it looks like http://static.323.157.45.152.clients.your-server.de
+
+It will show the following dashboard login page, and we can login using username and password mentioned in step:7 of this article.
+
+![grafana](images/grafana.png)
+
+All done. Please dont forget to star to support me. Let me know with your valuable feedback in Discussion tab: [click here](https://github.com/Haris3243/hatzner-kube-cluster/discussions)
+
